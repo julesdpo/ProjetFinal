@@ -40,7 +40,15 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    // Log first bytes of raw body to help debug malformed payloads
+    req.rawBody = buf.toString();
+    if (req.path === '/register' || req.path === '/login') {
+      console.log(`[raw-body ${req.path}]`, req.rawBody.slice(0, 200));
+    }
+  }
+}));
 app.use(cookieParser());
 app.use(morgan('combined'));
 

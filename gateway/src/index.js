@@ -41,17 +41,23 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('combined'));
 
-const limiter = rateLimit({
+const shouldSkipRateLimit = () => process.env.DISABLE_RATE_LIMIT === 'true';
+const limiterConfig = {
   windowMs: config.rateLimitWindowMs,
   max: config.rateLimitMax,
   standardHeaders: true,
-  legacyHeaders: false
-});
-if (process.env.DISABLE_RATE_LIMIT === 'true') {
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${req.path.split('/')[1] || 'root'}`,
+  skip: shouldSkipRateLimit
+};
+
+if (shouldSkipRateLimit()) {
   console.warn('Rate limiting disabled (dev mode).');
-} else {
-  app.use(limiter);
 }
+
+// Apply rate limit separately on /auth and /api to avoid sharing a single bucket.
+app.use('/auth', rateLimit(limiterConfig));
+app.use('/api', rateLimit(limiterConfig));
 
 // Promote HttpOnly access token cookie to Authorization header for downstream services.
 app.use((req, res, next) => {
@@ -78,16 +84,32 @@ const proxyCommon = {
   }
 };
 
+function fixRequestBody(proxyReq, req) {
+  if (!req.body || !Object.keys(req.body).length) return;
+  const bodyData = JSON.stringify(req.body);
+  proxyReq.setHeader('Content-Type', 'application/json');
+  proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+  proxyReq.write(bodyData);
+}
+
 app.use('/auth', createProxyMiddleware({
   ...proxyCommon,
   target: config.authServiceUrl,
-  pathRewrite: { '^/auth': '' }
+  pathRewrite: { '^/auth': '' },
+  onProxyReq: (proxyReq, req, res) => {
+    proxyCommon.onProxyReq(proxyReq, req, res);
+    fixRequestBody(proxyReq, req);
+  }
 }));
 
 app.use('/api', createProxyMiddleware({
   ...proxyCommon,
   target: config.apiServiceUrl,
-  pathRewrite: { '^/api': '' }
+  pathRewrite: { '^/api': '' },
+  onProxyReq: (proxyReq, req, res) => {
+    proxyCommon.onProxyReq(proxyReq, req, res);
+    fixRequestBody(proxyReq, req);
+  }
 }));
 
 app.use((req, res) => res.status(404).json({ message: 'Not found' }));
