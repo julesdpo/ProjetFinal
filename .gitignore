@@ -12,3 +12,9 @@ logs
 *.log
 security/zap-report*
 security/sonarqube-data
+security/zap-baseline-*.html
+security/zap-baseline-*.json
+security/zap_out.json
+.scannerwork
+security/
+sonar-project.properties
